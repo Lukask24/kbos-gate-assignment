@@ -23,7 +23,18 @@ export default async function handler(req, res) {
 
   try {
     const ident = callsign.replace(/\s+/g, '');
-    const url = 'https://aeroapi.flightaware.com/aeroapi/flights/' + encodeURIComponent(ident) + '?max_pages=1';
+    const board = type === 'departure' ? 'scheduled_departures' : 'scheduled_arrivals';
+
+    // The flight-ident endpoint is useful for status, but scheduled airport boards
+    // are the better source for today's upcoming KBOS gate assignment. FlightAware
+    // exposes the gate fields on these flight records.
+    const now = Date.now();
+    const start = new Date(now - 12 * 60 * 60 * 1000).toISOString();
+    const end = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+
+    const url = 'https://aeroapi.flightaware.com/aeroapi/airports/KBOS/flights/' +
+      board + '?max_pages=3&start=' + encodeURIComponent(start) +
+      '&end=' + encodeURIComponent(end);
 
     const response = await fetch(url, {
       headers: {
@@ -43,20 +54,39 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
-    const flights = Array.isArray(data.flights) ? data.flights : [];
+    const flights =
+      data[board] ||
+      data.flights ||
+      data.arrivals ||
+      data.departures ||
+      [];
 
-    const candidates = flights
+    const candidates = (Array.isArray(flights) ? flights : [])
       .filter(f => {
-        const origin = String(f.origin_icao || f.origin_iata || f.origin || '').toUpperCase();
-        const destination = String(f.destination_icao || f.destination_iata || f.destination || '').toUpperCase();
+        const ids = [
+          f.ident_icao,
+          f.ident_iata,
+          f.ident,
+          f.atc_ident
+        ].filter(Boolean).map(x => String(x).replace(/\s+/g, '').toUpperCase());
+
         const gate = type === 'departure' ? f.gate_origin : f.gate_destination;
-        return (type === 'departure' ? origin === 'KBOS' : destination === 'KBOS') &&
-          typeof gate === 'string' && gate.trim().length > 0;
+        return ids.includes(ident) &&
+          typeof gate === 'string' &&
+          gate.trim().length > 0;
       })
       .sort((a, b) => {
-        const ta = Date.parse(a.estimated_in || a.scheduled_in || a.estimated_out || a.scheduled_out || '') || 0;
-        const tb = Date.parse(b.estimated_in || b.scheduled_in || b.estimated_out || b.scheduled_out || '') || 0;
-        return Math.abs(ta - Date.now()) - Math.abs(tb - Date.now());
+        const ta = Date.parse(
+          type === 'departure'
+            ? (a.estimated_out || a.scheduled_out || '')
+            : (a.estimated_in || a.scheduled_in || '')
+        ) || 0;
+        const tb = Date.parse(
+          type === 'departure'
+            ? (b.estimated_out || b.scheduled_out || '')
+            : (b.estimated_in || b.scheduled_in || '')
+        ) || 0;
+        return Math.abs(ta - now) - Math.abs(tb - now);
       });
 
     const flight = candidates[0];
@@ -66,7 +96,7 @@ export default async function handler(req, res) {
         ok: true,
         found: false,
         provider: 'FlightAware',
-        message: 'No verified KBOS gate is currently available for this flight.'
+        message: 'FlightAware has no verified KBOS gate for this flight yet.'
       });
     }
 
@@ -80,10 +110,16 @@ export default async function handler(req, res) {
       provider: 'FlightAware',
       callsign: flight.ident_icao || flight.ident || ident,
       gate,
-      terminal: type === 'departure' ? (flight.terminal_origin || null) : (flight.terminal_destination || null),
+      terminal: type === 'departure'
+        ? (flight.terminal_origin || null)
+        : (flight.terminal_destination || null),
       status: flight.status || null,
-      scheduled: type === 'departure' ? (flight.scheduled_out || null) : (flight.scheduled_in || null),
-      estimated: type === 'departure' ? (flight.estimated_out || null) : (flight.estimated_in || null),
+      scheduled: type === 'departure'
+        ? (flight.scheduled_out || null)
+        : (flight.scheduled_in || null),
+      estimated: type === 'departure'
+        ? (flight.estimated_out || null)
+        : (flight.estimated_in || null),
       origin: flight.origin_icao || flight.origin_iata || null,
       destination: flight.destination_icao || flight.destination_iata || null
     });
