@@ -37,7 +37,42 @@ export default async function handler(req, res) {
   };
   const gateFor = f => {
     const gate = type === 'departure' ? f.gate_origin : f.gate_destination;
-    return typeof gate === 'string' && gate.trim() ? gate.trim().toUpperCase() : null;
+    if (typeof gate !== 'string' || !gate.trim()) return null;
+    const normalized = gate.trim().toUpperCase();
+    // KBOS passenger gates are lettered (A/B/C/E). Reject bare numeric or
+    // unrelated gate labels that can appear on a stale/mismatched flight record.
+    if (!/^[ABCE]\d{1,2}[A-Z]?$/.test(normalized)) return null;
+    return normalized;
+  };
+
+  const flightTime = f => {
+    const value = type === 'departure'
+      ? (f.actual_out || f.estimated_out || f.scheduled_out)
+      : (f.actual_in || f.estimated_in || f.scheduled_in);
+    const ms = Date.parse(value || '');
+    return Number.isFinite(ms) ? ms : null;
+  };
+
+  const chooseBest = candidates => {
+    const now = Date.now();
+    return candidates
+      .filter(x => x && x.f && x.gate)
+      .sort((a, b) => {
+        const at = flightTime(a.f);
+        const bt = flightTime(b.f);
+        const aHasTime = at !== null;
+        const bHasTime = bt !== null;
+
+        // Prefer records with a usable time, then prefer the record closest
+        // to now. This prevents an older same-callsign flight from winning.
+        if (aHasTime !== bHasTime) return aHasTime ? -1 : 1;
+        if (aHasTime && bHasTime) return Math.abs(at - now) - Math.abs(bt - now);
+
+        // Prefer records that look operational rather than cancelled/diverted.
+        const aBad = a.f.cancelled || a.f.diverted ? 1 : 0;
+        const bBad = b.f.cancelled || b.f.diverted ? 1 : 0;
+        return aBad - bBad;
+      })[0] || null;
   };
   const matchesCallsign = f => [f.ident_icao, f.ident_iata, f.ident, f.atc_ident].map(cleanIdent).includes(cleanIdent(callsign));
   const matchesKBOS = f => {
@@ -63,7 +98,10 @@ export default async function handler(req, res) {
     // 1. Direct flight lookup: best source for a specific flight and its actual gate.
     const direct = await getJSON('flights/' + encodeURIComponent(ident) + '?max_pages=1');
     const directFlights = Array.isArray(direct.flights) ? direct.flights : [];
-    const directMatch = directFlights.map(f => ({ f, gate: gateFor(f) })).find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
+    const directCandidates = directFlights
+      .filter(f => matchesCallsign(f) && matchesKBOS(f))
+      .map(f => ({ f, gate: gateFor(f) }));
+    const directMatch = chooseBest(directCandidates);
     if (directMatch) return res.status(200).json(makeResult(directMatch.f, directMatch.gate));
 
     // 2. Future scheduled traffic. Do not send start/end: the endpoint itself is
@@ -72,18 +110,20 @@ export default async function handler(req, res) {
     const board = type === 'departure' ? 'scheduled_departures' : 'scheduled_arrivals';
     const scheduled = await getJSON('airports/KBOS/flights/' + board + '?max_pages=1');
     const scheduledFlights = scheduled.flights || scheduled.arrivals || scheduled.departures || [];
-    const scheduledMatch = (Array.isArray(scheduledFlights) ? scheduledFlights : [])
-      .map(f => ({ f, gate: gateFor(f) }))
-      .find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
+    const scheduledCandidates = (Array.isArray(scheduledFlights) ? scheduledFlights : [])
+      .filter(f => matchesCallsign(f) && matchesKBOS(f))
+      .map(f => ({ f, gate: gateFor(f) }));
+    const scheduledMatch = chooseBest(scheduledCandidates);
     if (scheduledMatch) return res.status(200).json(makeResult(scheduledMatch.f, scheduledMatch.gate));
 
     // 3. Recent airport traffic: covers flights that already operated.
     const recentBoard = type === 'departure' ? 'departures' : 'arrivals';
     const recent = await getJSON('airports/KBOS/flights/' + recentBoard + '?max_pages=1');
     const recentFlights = recent.flights || recent.arrivals || recent.departures || [];
-    const recentMatch = (Array.isArray(recentFlights) ? recentFlights : [])
-      .map(f => ({ f, gate: gateFor(f) }))
-      .find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
+    const recentCandidates = (Array.isArray(recentFlights) ? recentFlights : [])
+      .filter(f => matchesCallsign(f) && matchesKBOS(f))
+      .map(f => ({ f, gate: gateFor(f) }));
+    const recentMatch = chooseBest(recentCandidates);
     if (recentMatch) return res.status(200).json(makeResult(recentMatch.f, recentMatch.gate));
 
     return res.status(200).json({ ok: true, found: false, provider: 'FlightAware', message: 'FlightAware found the flight, but its KBOS gate is currently null or unavailable.' });
