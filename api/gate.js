@@ -30,14 +30,19 @@ export default async function handler(req, res) {
   }
 
   const cleanIdent = value => String(value || '').replace(/\s+/g, '').toUpperCase();
+  const airportCode = value => {
+    if (!value) return '';
+    if (typeof value === 'string') return cleanIdent(value);
+    return cleanIdent(value.code_icao || value.code || value.code_iata || value.code_lid);
+  };
   const gateFor = f => {
     const gate = type === 'departure' ? f.gate_origin : f.gate_destination;
     return typeof gate === 'string' && gate.trim() ? gate.trim().toUpperCase() : null;
   };
   const matchesCallsign = f => [f.ident_icao, f.ident_iata, f.ident, f.atc_ident].map(cleanIdent).includes(cleanIdent(callsign));
   const matchesKBOS = f => {
-    const o = cleanIdent(f.origin_icao || f.origin_iata || f.origin);
-    const d = cleanIdent(f.destination_icao || f.destination_iata || f.destination);
+    const o = airportCode(f.origin_icao || f.origin_iata || f.origin);
+    const d = airportCode(f.destination_icao || f.destination_iata || f.destination);
     return type === 'departure' ? o === 'KBOS' : d === 'KBOS';
   };
   const makeResult = (f, gate) => ({
@@ -48,8 +53,8 @@ export default async function handler(req, res) {
     scheduled: type === 'departure' ? (f.scheduled_out || null) : (f.scheduled_in || null),
     estimated: type === 'departure' ? (f.estimated_out || null) : (f.estimated_in || null),
     actual: type === 'departure' ? (f.actual_out || null) : (f.actual_in || null),
-    origin: f.origin_icao || f.origin_iata || null,
-    destination: f.destination_icao || f.destination_iata || null
+    origin: f.origin_icao || f.origin_iata || airportCode(f.origin) || null,
+    destination: f.destination_icao || f.destination_iata || airportCode(f.destination) || null
   });
 
   try {
@@ -61,23 +66,27 @@ export default async function handler(req, res) {
     const directMatch = directFlights.map(f => ({ f, gate: gateFor(f) })).find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
     if (directMatch) return res.status(200).json(makeResult(directMatch.f, directMatch.gate));
 
-    // 2. Recent airport traffic: covers flights that already operated today.
+    // 2. Future scheduled traffic. Do not send start/end: the endpoint itself is
+    // already scoped to future scheduled flights, and this avoids provider-specific
+    // start-bound validation issues.
+    const board = type === 'departure' ? 'scheduled_departures' : 'scheduled_arrivals';
+    const scheduled = await getJSON('airports/KBOS/flights/' + board + '?max_pages=1');
+    const scheduledFlights = scheduled.flights || scheduled.arrivals || scheduled.departures || [];
+    const scheduledMatch = (Array.isArray(scheduledFlights) ? scheduledFlights : [])
+      .map(f => ({ f, gate: gateFor(f) }))
+      .find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
+    if (scheduledMatch) return res.status(200).json(makeResult(scheduledMatch.f, scheduledMatch.gate));
+
+    // 3. Recent airport traffic: covers flights that already operated.
     const recentBoard = type === 'departure' ? 'departures' : 'arrivals';
     const recent = await getJSON('airports/KBOS/flights/' + recentBoard + '?max_pages=1');
     const recentFlights = recent.flights || recent.arrivals || recent.departures || [];
-    const recentMatch = (Array.isArray(recentFlights) ? recentFlights : []).map(f => ({ f, gate: gateFor(f) })).find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
+    const recentMatch = (Array.isArray(recentFlights) ? recentFlights : [])
+      .map(f => ({ f, gate: gateFor(f) }))
+      .find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
     if (recentMatch) return res.status(200).json(makeResult(recentMatch.f, recentMatch.gate));
 
-    // 3. Future scheduled traffic: start now and look 24 hours ahead.
-    const board = type === 'departure' ? 'scheduled_departures' : 'scheduled_arrivals';
-    const startTime = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString().replace(/\.000Z$/, 'Z');
-    const endTime = new Date(Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000) * 1000).toISOString().replace(/\.000Z$/, 'Z');
-    const scheduled = await getJSON('airports/KBOS/flights/' + board + '?max_pages=1&start=' + encodeURIComponent(startTime) + '&end=' + encodeURIComponent(endTime));
-    const scheduledFlights = scheduled.flights || scheduled.arrivals || scheduled.departures || [];
-    const scheduledMatch = (Array.isArray(scheduledFlights) ? scheduledFlights : []).map(f => ({ f, gate: gateFor(f) })).find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
-    if (scheduledMatch) return res.status(200).json(makeResult(scheduledMatch.f, scheduledMatch.gate));
-
-    return res.status(200).json({ ok: true, found: false, provider: 'FlightAware', message: 'FlightAware returned the flight, but no verified KBOS gate is available yet.' });
+    return res.status(200).json({ ok: true, found: false, provider: 'FlightAware', message: 'FlightAware found the flight, but its KBOS gate is currently null or unavailable.' });
   } catch (error) {
     const status = Number(error.status) || 502;
     return res.status(status >= 400 && status < 600 ? status : 502).json({ ok: false, provider: 'FlightAware', error: String(error.message || 'FlightAware request failed.') });
