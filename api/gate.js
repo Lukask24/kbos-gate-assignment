@@ -8,8 +8,8 @@ export default async function handler(req, res) {
   const callsign = String(req.query.callsign || '').trim().toUpperCase();
   const type = String(req.query.type || 'arrival').toLowerCase();
 
-  if (!/^[A-Z0-9 -]{2,12}$/.test(callsign)) {
-    return res.status(400).json({ ok: false, error: 'Invalid callsign.' });
+  if (!/^[A-Z0-9 -]{2,12}$/.test(callsign) || !['arrival', 'departure'].includes(type)) {
+    return res.status(400).json({ ok: false, error: 'Invalid callsign or flight type.' });
   }
 
   const key = process.env.FLIGHTAWARE_API_KEY;
@@ -22,63 +22,72 @@ export default async function handler(req, res) {
   }
 
   try {
-    const url = 'https://aeroapi.flightaware.com/aeroapi/flights/' +
-      encodeURIComponent(callsign.replace(/\s+/g, ''));
+    const ident = callsign.replace(/\s+/g, '');
+    const url = 'https://aeroapi.flightaware.com/aeroapi/flights/' + encodeURIComponent(ident);
 
     const response = await fetch(url, {
-      headers: { 'x-apikey': key, 'Accept': 'application/json' }
+      headers: {
+        'x-apikey': key,
+        'Accept': 'application/json'
+      }
     });
 
     if (!response.ok) {
-      const body = await response.text();
       return res.status(response.status).json({
         ok: false,
         provider: 'FlightAware',
-        error: body || 'FlightAware request failed.'
+        error: response.status === 401 || response.status === 403
+          ? 'FlightAware credentials or plan do not permit this request.'
+          : 'FlightAware did not return a successful response.'
       });
     }
 
     const data = await response.json();
     const flights = Array.isArray(data.flights) ? data.flights : [];
 
-    const bos = flights.filter(f => {
-      const destination = f.destination?.code || f.destination?.code_icao || f.destination;
-      const origin = f.origin?.code || f.origin?.code_icao || f.origin;
-      return type === 'departure' ? String(origin || '').toUpperCase() === 'KBOS'
-        : String(destination || '').toUpperCase() === 'KBOS';
-    });
+    const candidates = flights
+      .filter(f => {
+        const origin = String(f.origin_icao || f.origin_iata || f.origin || '').toUpperCase();
+        const destination = String(f.destination_icao || f.destination_iata || f.destination || '').toUpperCase();
+        const gate = type === 'departure' ? f.gate_origin : f.gate_destination;
+        return (type === 'departure' ? origin === 'KBOS' : destination === 'KBOS') &&
+          typeof gate === 'string' && gate.trim().length > 0;
+      })
+      .sort((a, b) => {
+        const ta = Date.parse(a.estimated_in || a.scheduled_in || a.estimated_out || a.scheduled_out || '') || 0;
+        const tb = Date.parse(b.estimated_in || b.scheduled_in || b.estimated_out || b.scheduled_out || '') || 0;
+        return Math.abs(ta - Date.now()) - Math.abs(tb - Date.now());
+      });
 
-    const gateField = type === 'departure' ? 'gate_origin' : 'gate_destination';
-    const timeField = type === 'departure' ? 'scheduled_out' : 'scheduled_in';
-
-    const withGates = bos
-      .filter(f => f[gateField])
-      .sort((a, b) => String(b[timeField] || '').localeCompare(String(a[timeField] || '')));
-
-    const flight = withGates[0];
+    const flight = candidates[0];
 
     if (!flight) {
       return res.status(200).json({
         ok: true,
         found: false,
         provider: 'FlightAware',
-        message: 'No verified KBOS gate was returned for this flight.'
+        message: 'No verified KBOS gate is currently available for this flight.'
       });
     }
+
+    const gate = String(type === 'departure' ? flight.gate_origin : flight.gate_destination)
+      .trim()
+      .toUpperCase();
 
     return res.status(200).json({
       ok: true,
       found: true,
       provider: 'FlightAware',
-      callsign: flight.ident_icao || flight.ident || callsign,
-      gate: String(flight[gateField]).trim().toUpperCase(),
-      terminal: flight.terminal_destination || flight.terminal_origin || null,
+      callsign: flight.ident_icao || flight.ident || ident,
+      gate,
+      terminal: type === 'departure' ? (flight.terminal_origin || null) : (flight.terminal_destination || null),
       status: flight.status || null,
-      scheduled: flight[timeField] || null,
-      origin: flight.origin?.code_icao || flight.origin?.code || null,
-      destination: flight.destination?.code_icao || flight.destination?.code || null
+      scheduled: type === 'departure' ? (flight.scheduled_out || null) : (flight.scheduled_in || null),
+      estimated: type === 'departure' ? (flight.estimated_out || null) : (flight.estimated_in || null),
+      origin: flight.origin_icao || flight.origin_iata || null,
+      destination: flight.destination_icao || flight.destination_iata || null
     });
-  } catch (error) {
+  } catch {
     return res.status(502).json({
       ok: false,
       provider: 'FlightAware',
