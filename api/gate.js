@@ -23,7 +23,7 @@ export default async function handler(req, res) {
 
   try {
     const ident = callsign.replace(/\s+/g, '');
-    const url = 'https://aeroapi.flightaware.com/aeroapi/flights/' + encodeURIComponent(ident);
+    const url = 'https://aeroapi.flightaware.com/aeroapi/flights/' + encodeURIComponent(ident) + '?max_pages=1';
 
     const response = await fetch(url, {
       headers: {
