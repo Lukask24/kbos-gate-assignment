@@ -70,7 +70,9 @@ export default async function handler(req, res) {
 
     // 3. Future scheduled traffic: start now and look 24 hours ahead.
     const board = type === 'departure' ? 'scheduled_departures' : 'scheduled_arrivals';
-    const scheduled = await getJSON('airports/KBOS/flights/' + board + '?max_pages=1&start=' + encodeURIComponent(new Date().toISOString()) + '&end=' + encodeURIComponent(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()));
+    const startTime = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString().replace(/\.000Z$/, 'Z');
+    const endTime = new Date(Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000) * 1000).toISOString().replace(/\.000Z$/, 'Z');
+    const scheduled = await getJSON('airports/KBOS/flights/' + board + '?max_pages=1&start=' + encodeURIComponent(startTime) + '&end=' + encodeURIComponent(endTime));
     const scheduledFlights = scheduled.flights || scheduled.arrivals || scheduled.departures || [];
     const scheduledMatch = (Array.isArray(scheduledFlights) ? scheduledFlights : []).map(f => ({ f, gate: gateFor(f) })).find(x => matchesCallsign(x.f) && matchesKBOS(x.f) && x.gate);
     if (scheduledMatch) return res.status(200).json(makeResult(scheduledMatch.f, scheduledMatch.gate));
