@@ -12,8 +12,8 @@ const PARKING={
 };
 const international=new Set(['ACA','BAW','DLH','AFR','KLM','SWR','ICE','AZA','IBE','VIR','QTR','UAE','EVA','ANA','JAL','TAP','EIN','ETD','SIA','THA','KAL','CPA','ARG','AVIANCA','LATAM']);
 const $=id=>document.getElementById(id); let assignments=load();
-function normalizeGate(g){g=String(g||'').toUpperCase().trim(); return g.replace(/^([ABC])\\1(\\d+[A-Z]?)$/,'$1$2')}
-function load(){try{const current=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(current&&typeof current==='object')return current; const old=JSON.parse(localStorage.getItem(OLD_STORAGE_KEY))||{}; const migrated={}; for(const [cs,x] of Object.entries(old)){migrated[cs]={...x,gate:normalizeGate(x.gate)};} if(Object.keys(migrated).length)localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated)); return migrated}catch{return{}}}
+function normalizeGate(g){g=String(g||'').toUpperCase().trim(); return g.replace(/^([ABC])\1(\d+[A-Z]?)$/,'$1$2')}
+function load(){try{const current=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(current&&typeof current==='object'){const cleaned={}; for(const [cs,x] of Object.entries(current)){cleaned[cs]={...x,gate:normalizeGate(x.gate)};} localStorage.setItem(STORAGE_KEY,JSON.stringify(cleaned)); return cleaned;} const old=JSON.parse(localStorage.getItem(OLD_STORAGE_KEY))||{}; const migrated={}; for(const [cs,x] of Object.entries(old)){migrated[cs]={...x,gate:normalizeGate(x.gate)};} if(Object.keys(migrated).length)localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated)); return migrated}catch{return{}}}
 function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(assignments));}
 function prefix(cs){return cs.toUpperCase().replace(/[^A-Z]/g,'').slice(0,3)}
 function expandRange(range){const [a,b]=range; return Array.from({length:b-a+1},(_,i)=>a+i);}
