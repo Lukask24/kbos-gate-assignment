@@ -85,7 +85,7 @@ Do not put the key in `app.js`, `index.html`, or any committed file.
 - `feature/live-gates`: live-data development branch
 - `checkpoint/working-gate-engine`: frozen pre-live-gate checkpoint
 
-Future changes should be developed on a feature branch, tested on a Vercel Preview deployment, and merged into `main) only after regression testing.
+Future changes should be developed on a feature branch, tested on a Vercel Preview deployment, and merged into `main` only after regression testing.
 
 ## Operational notes
 
