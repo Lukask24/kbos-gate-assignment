@@ -1,4 +1,5 @@
-const STORAGE_KEY='kbos-gate-assignments-v1';
+const STORAGE_KEY='kbos-gate-assignments-v2';
+const OLD_STORAGE_KEY='kbos-gate-assignments-v1';
 const PARKING={
  'DAL':{name:'Delta',pool:'A',range:[1,22]},
  'ACA':{name:'Air Canada / Jazz / PVL',pool:'B',gates:['B1','B2','B3']}, 'JZA':{name:'Air Canada / Jazz / PVL',pool:'B',gates:['B1','B2','B3']}, 'PVL':{name:'Air Canada / Jazz / PVL',pool:'B',gates:['B1','B2','B3']},
@@ -11,20 +12,21 @@ const PARKING={
 };
 const international=new Set(['ACA','BAW','DLH','AFR','KLM','SWR','ICE','AZA','IBE','VIR','QTR','UAE','EVA','ANA','JAL','TAP','EIN','ETD','SIA','THA','KAL','CPA','ARG','AVIANCA','LATAM']);
 const $=id=>document.getElementById(id); let assignments=load();
-function load(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||{}}catch{return{}}}
+function normalizeGate(g){g=String(g||'').toUpperCase().trim(); return g.replace(/^([ABC])\\1(\\d+[A-Z]?)$/,'$1$2')}
+function load(){try{const current=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(current&&typeof current==='object')return current; const old=JSON.parse(localStorage.getItem(OLD_STORAGE_KEY))||{}; const migrated={}; for(const [cs,x] of Object.entries(old)){migrated[cs]={...x,gate:normalizeGate(x.gate)};} if(Object.keys(migrated).length)localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated)); return migrated}catch{return{}}}
 function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(assignments));}
 function prefix(cs){return cs.toUpperCase().replace(/[^A-Z]/g,'').slice(0,3)}
 function expandRange(range){const [a,b]=range; return Array.from({length:b-a+1},(_,i)=>a+i);}
 function poolFor(cs,type){const p=prefix(cs), rule=PARKING[p]; if(rule){if(p==='RPA'){return poolForRepublic(cs,type)} if(rule.gates)return rule.gates.slice(); if(rule.special&&p==='SWA')return ['B31A','B31B','B32','B33','B34','B35']; if(rule.pool==='A')return expandRange(rule.range).map(n=>'A'+n); if(rule.pool==='B')return expandRange(rule.range).map(n=>'B'+n); if(rule.pool==='C')return expandRange(rule.range).map(n=>'C'+n)} if(type==='arrival'&&international.has(p))return ['E']; return []}
-function poolForRepublic(cs,type){const m=cs.toUpperCase().replace(/[^A-Z0-9]/g,''); if(/^RPA3\d{3}$/.test(m))return expandRange([23,31]).map(n=>'B'+n); if(/^RPA4\d{3}$/.test(m))return expandRange([4,22]).map(n=>'B'+n); if(/^RPA5\d{3}$/.test(m))return expandRange([1,22]).map(n=>'A'+n); return []}
-function areaFor(cs,type){const p=prefix(cs),r=PARKING[p]; if(p==='RPA'){const m=cs.toUpperCase().replace(/[^A-Z0-9]/g,''); if(/^RPA3\d{3}$/.test(m))return 'Republic Airways — United'; if(/^RPA4\d{3}$/.test(m))return 'Republic Airways — American'; if(/^RPA5\d{3}$/.test(m))return 'Republic Airways — Delta'; return 'Republic Airways — airline assignment unknown'} if(r)return r.name; if(type==='arrival'&&international.has(p))return 'International — Terminal E'; return 'Unlisted airline / use appropriate terminal-area fallback'}
+function poolForRepublic(cs,type){const m=cs.toUpperCase().replace(/[^A-Z0-9]/g,''); if(/^RPA3\d{3,}$/.test(m))return expandRange([23,31]).map(n=>'B'+n); if(/^RPA4\d{3,}$/.test(m))return expandRange([4,22]).map(n=>'B'+n); if(/^RPA5\d{3,}$/.test(m))return expandRange([1,22]).map(n=>'A'+n); return []}
+function areaFor(cs,type){const p=prefix(cs),r=PARKING[p]; if(p==='RPA'){const m=cs.toUpperCase().replace(/[^A-Z0-9]/g,''); if(/^RPA3\d{3,}$/.test(m))return 'Republic Airways — United'; if(/^RPA4\d{3,}$/.test(m))return 'Republic Airways — American'; if(/^RPA5\d{3,}$/.test(m))return 'Republic Airways — Delta'; return 'Republic Airways — airline assignment unknown'} if(r)return r.name; if(type==='arrival'&&international.has(p))return 'International — Terminal E'; return 'Unlisted airline / use appropriate terminal-area fallback'}
 function occupied(){return new Set(Object.values(assignments).map(x=>x.gate))}
 function chooseFallback(cs,type){const pool=poolFor(cs,type), used=occupied(); const available=pool.filter(g=>!used.has(g)); if(!available.length)return null; return available[Math.floor(Math.random()*available.length)]}
 function assign(cs,type,manual,real){cs=cs.toUpperCase().trim(); if(!cs)return null; if(assignments[cs]&&!manual&&!real)return {...assignments[cs],existing:true};
  let gate=(manual||real||'').toUpperCase().trim(), source=manual?'Manual override':real?'Real-world':'BVA SOP fallback';
  if(gate && Object.values(assignments).some(x=>x.gate===gate&&x.callsign!==cs)) throw new Error(`Gate ${gate} is already assigned.`);
  if(!gate){gate=chooseFallback(cs,type); if(!gate)throw new Error('No unused gate is available in the appropriate BVA parking pool.');}
- assignments[cs]={callsign:cs,gate,source,area:areaFor(cs,type),type,updated:new Date().toISOString()}; save(); render(); return assignments[cs];
+ gate=normalizeGate(gate); assignments[cs]={callsign:cs,gate,source,area:areaFor(cs,type),type,updated:new Date().toISOString()}; save(); render(); return assignments[cs];
 }
 function render(){const rows=Object.values(assignments).sort((a,b)=>a.callsign.localeCompare(b.callsign)); $('count').textContent=rows.length; const el=$('assignments'); el.classList.toggle('empty',!rows.length); el.innerHTML=rows.length?rows.map(x=>`<div class="assignment"><div class="gate">${esc(x.gate)}</div><div><div class="callsign">${esc(x.callsign)}</div><div class="sub">${esc(x.area)} · ${esc(x.source)}</div></div><button data-release="${esc(x.callsign)}">Release</button></div>`).join(''):'No active gate assignments.'}
 function esc(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
