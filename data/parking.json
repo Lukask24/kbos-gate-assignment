@@ -1,0 +1,22 @@
+{
+  "source": "BVA KBOS SOP §4.2 Parking Locations",
+  "version": "H",
+  "effective": "2026-09-17",
+  "locations": [
+    {"name":"Signature Aviation","category":"General Aviation","gates":[],"inboundRoute":"Alpha","note":"Bravo is normally used for outbound aircraft."},
+    {"name":"Delta","category":"Airline","gates":["A1-A22"]},
+    {"name":"Air Canada / Jazz / PVL","category":"Airline","gates":["B1-B3"]},
+    {"name":"American Airlines","category":"Airline","gates":["B4-B22"]},
+    {"name":"Boutique Air","category":"Airline","gates":["B37"]},
+    {"name":"Southwest","category":"Airline","gates":["B31A-B35"]},
+    {"name":"United","category":"Airline","gates":["B23-B31"]},
+    {"name":"Aer Lingus","category":"Airline","gates":["C20","C21"]},
+    {"name":"Cape Air","category":"Airline","gates":["C27"]},
+    {"name":"Etihad Airways","category":"Airline","gates":["C17"]},
+    {"name":"JetBlue","category":"Airline","gates":["C8-C36"]},
+    {"name":"TAP Air Portugal","category":"Airline","gates":["C17","C20"]},
+    {"name":"All Other International Arrivals","category":"International","gates":["E"]},
+    {"name":"FedEx","category":"Cargo","gates":["South Cargo"]},
+    {"name":"Other Cargo","category":"Cargo","gates":["North Cargo"]}
+  ]
+}
