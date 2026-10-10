@@ -6,7 +6,7 @@ const OLD_STORAGE_KEY='kbos-gate-assignments-v1';
 const PARKING={
  'DAL':{name:'Delta',pool:'A',range:[1,22]},
  'ACA':{name:'Air Canada / Jazz / PVL',pool:'B',gates:['B1','B2','B3']}, 'JZA':{name:'Air Canada / Jazz / PVL',pool:'B',gates:['B1','B2','B3']}, 'PVL':{name:'Air Canada / Jazz / PVL',pool:'B',gates:['B1','B2','B3']},
- 'AAL':{name:'American Airlines',pool:'B',range:[4,22]}, 'BAW':{name:'American Airlines',pool:'B',range:[4,22]},
+ 'AAL':{name:'American Airlines',pool:'B',range:[4,22]},
  'RPA':{name:'Republic Airways',pool:'RPA'},
  'BTQ':{name:'Boutique Air',pool:'B',gates:['B37']}, 'SWA':{name:'Southwest',pool:'B',special:true},
  'UAL':{name:'United',pool:'B',range:[23,31]},
@@ -16,7 +16,7 @@ const PARKING={
 const international=new Set(['ACA','BAW','DLH','AFR','KLM','SWR','ICE','AZA','IBE','VIR','QTR','UAE','EVA','ANA','JAL','TAP','EIN','ETD','SIA','THA','KAL','CPA','ARG','AVIANCA','LATAM']);
 const $=id=>document.getElementById(id); let assignments=load();
 function normalizeGate(g){g=String(g||'').toUpperCase().trim(); return g.replace(/^([ABC])\1(\d+[A-Z]?)$/,'$1$2')}
-function load(){try{const current=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(current&&typeof current==='object'){const cleaned={}; for(const [cs,x] of Object.entries(current)){cleaned[cs]={...x,gate:normalizeGate(x.gate)};} localStorage.setItem(STORAGE_KEY,JSON.stringify(cleaned)); return cleaned;} const old=JSON.parse(localStorage.getItem(OLD_STORAGE_KEY))||{}; const migrated={}; for(const [cs,x] of Object.entries(old)){migrated[cs]={...x,gate:normalizeGate(x.gate)};} if(Object.keys(migrated).length)localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated)); return migrated}catch{return{}}}
+function load(){try{const current=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(current&&typeof current==='object'){const cleaned={}; for(const [cs,x] of Object.entries(current)){const item={...x,gate:normalizeGate(x.gate)}; if(prefix(cs)==='BAW' && item.source==='BVA SOP fallback' && item.area==='American Airlines'){item.gate='E';item.area='International — Terminal E';} cleaned[cs]=item;} localStorage.setItem(STORAGE_KEY,JSON.stringify(cleaned)); return cleaned;} const old=JSON.parse(localStorage.getItem(OLD_STORAGE_KEY))||{}; const migrated={}; for(const [cs,x] of Object.entries(old)){migrated[cs]={...x,gate:normalizeGate(x.gate)};} if(Object.keys(migrated).length)localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated)); return migrated}catch{return{}}}
 function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(assignments));}
 function prefix(cs){return cs.toUpperCase().replace(/[^A-Z]/g,'').slice(0,3)}
 function expandRange(range){const [a,b]=range; return Array.from({length:b-a+1},(_,i)=>a+i);}
